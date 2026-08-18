@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from aiohttp import web
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import (
     Message, 
@@ -10,7 +11,7 @@ from aiogram.types import (
 )
 from aiogram.filters import Filter
 
-# --- CONFIGURACIÓN ---
+# ================= CONFIGURACIÓN =================
 TOKEN = '8689803553:AAEsQ6Pvwxnil8g8feUxnRuMBEL5D0r9U1Q'
 
 # Lista de IDs de los usuarios designados
@@ -25,10 +26,14 @@ dp = Dispatcher()
 # Búfer temporal para agrupar los mensajes que forman parte de un álbum
 album_cache = {}
 
+# ================= FILTROS =================
 # Filtro personalizado para verificar si el usuario está autorizado
 class IsAuthorized(Filter):
     async def __call__(self, message: Message) -> bool:
         return message.from_user.id in AUTHORIZED_IDS
+
+
+# ================= HANDLERS DEL BOT =================
 
 # 1. HANDLER PARA MEDIOS INDIVIDUALES (Sin media_group_id)
 @dp.message(
@@ -45,6 +50,7 @@ async def handle_single_media(message: Message):
     except Exception as e:
         logging.error(f"Error borrando mensaje individual: {e}")
 
+
 # 2. HANDLER PARA ÁLBUMES (Con media_group_id)
 @dp.message(
     IsAuthorized(), 
@@ -60,6 +66,7 @@ async def handle_album(message: Message):
 
     # Añadimos el mensaje actual al búfer del álbum
     album_cache[group_id].append(message)
+
 
 async def process_album(chat_id: int, group_id: str):
     # Esperamos medio segundo para dar tiempo a que lleguen todas las partes del álbum
@@ -101,9 +108,32 @@ async def process_album(chat_id: int, group_id: str):
         except Exception as e:
             logging.error(f"No se pudo borrar el mensaje del álbum: {e}")
 
+
+# ================= SERVIDOR WEB FALSO PARA RENDER =================
+async def handle(request):
+    return web.Response(text="Bot is running!")
+
+async def web_server():
+    app = web.Application()
+    app.router.add_get("/", handle)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    # Render asigna dinámicamente un puerto a través de la variable de entorno PORT.
+    # Si no existe, usamos 10000 por defecto.
+    import os
+    port = int(os.environ.get("PORT", 10000))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    logging.info(f"Servidor web iniciado en el puerto {port}")
+
+
+# ================= EJECUCIÓN PRINCIPAL =================
 async def main():
-    print("Bot iniciado y escuchando mensajes...")
-    # Comenzamos a escuchar mensajes
+    # Iniciamos el servidor web falso en segundo plano
+    asyncio.create_task(web_server())
+    
+    print("🤖 Bot Iniciado y escuchando mensajes...")
+    # Comenzamos a escuchar mensajes del bot
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
