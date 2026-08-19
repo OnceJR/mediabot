@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import html
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import (
@@ -13,6 +14,7 @@ from aiogram.types import (
 from aiogram.filters import Filter
 
 # ================= CONFIGURACIÓN =================
+# TU NUEVO TOKEN
 TOKEN = '8833704103:AAGaNnBX2XpRxcFnjiC3m_5E2FAVXL7rmrs'
 
 # Lista de IDs de los usuarios designados
@@ -42,11 +44,29 @@ class IsAuthorized(Filter):
     F.content_type.in_({'photo', 'video', 'document', 'audio', 'voice', 'animation'})
 )
 async def handle_single_media(message: Message):
-    # SOLUCIÓN AQUÍ: Añadimos message_thread_id para que respete los Temas del grupo
+    # Obtenemos quién lo envió (Username o Nombre Completo)
+    user = message.from_user
+    if user.username:
+        sender_name = f"@{user.username}"
+    else:
+        sender_name = user.full_name
+        
+    # Escapamos caracteres especiales para evitar errores con HTML y armamos la firma
+    sender_name = html.escape(sender_name)
+    firma = f"\n\n<i>Enviado por: {sender_name}</i>"
+
+    # Extraemos el texto original (si tiene) manteniendo su formato y le sumamos la firma
+    original_caption = message.html_text if message.html_text else ""
+    new_caption = original_caption + firma
+
+    # Copiamos el archivo al mismo grupo/tema, pero inyectando nuestro nuevo texto
     await message.copy_to(
         chat_id=message.chat.id,
-        message_thread_id=message.message_thread_id
+        message_thread_id=message.message_thread_id,
+        caption=new_caption,
+        parse_mode="HTML"
     )
+    
     try:
         await message.delete()
     except Exception as e:
@@ -62,12 +82,10 @@ async def handle_album(message: Message):
 
     if group_id not in album_cache:
         album_cache[group_id] = []
-        # Pasamos también el ID del tema (message_thread_id) a la función
         asyncio.create_task(process_album(message.chat.id, group_id, message.message_thread_id))
 
     album_cache[group_id].append(message)
 
-# SOLUCIÓN AQUÍ: Recibimos el thread_id
 async def process_album(chat_id: int, group_id: str, thread_id: int | None):
     await asyncio.sleep(0.5)
 
@@ -75,24 +93,39 @@ async def process_album(chat_id: int, group_id: str, thread_id: int | None):
     if not messages:
         return
 
+    # Obtenemos el autor del primer archivo del álbum
+    user = messages[0].from_user
+    if user.username:
+        sender_name = f"@{user.username}"
+    else:
+        sender_name = user.full_name
+        
+    sender_name = html.escape(sender_name)
+    firma = f"\n\n<i>Enviado por: {sender_name}</i>"
+
     media_group = []
     
-    for msg in messages:
-        caption = msg.caption if msg.caption else None
-        caption_entities = msg.caption_entities
+    for i, msg in enumerate(messages):
+        # Mantenemos el formato del texto original
+        original_caption = msg.html_text if msg.html_text else ""
+        
+        # Solo le ponemos la firma a la primera foto/video del álbum
+        if i == 0:
+            new_caption = original_caption + firma
+        else:
+            new_caption = original_caption
 
         if msg.photo:
-            media_group.append(InputMediaPhoto(media=msg.photo[-1].file_id, caption=caption, caption_entities=caption_entities))
+            media_group.append(InputMediaPhoto(media=msg.photo[-1].file_id, caption=new_caption, parse_mode="HTML"))
         elif msg.video:
-            media_group.append(InputMediaVideo(media=msg.video.file_id, caption=caption, caption_entities=caption_entities))
+            media_group.append(InputMediaVideo(media=msg.video.file_id, caption=new_caption, parse_mode="HTML"))
         elif msg.document:
-            media_group.append(InputMediaDocument(media=msg.document.file_id, caption=caption, caption_entities=caption_entities))
+            media_group.append(InputMediaDocument(media=msg.document.file_id, caption=new_caption, parse_mode="HTML"))
         elif msg.audio:
-            media_group.append(InputMediaAudio(media=msg.audio.file_id, caption=caption, caption_entities=caption_entities))
+            media_group.append(InputMediaAudio(media=msg.audio.file_id, caption=new_caption, parse_mode="HTML"))
 
     if media_group:
         try:
-            # SOLUCIÓN AQUÍ: Usamos el thread_id al enviar el álbum
             await bot.send_media_group(
                 chat_id=chat_id, 
                 media=media_group,
