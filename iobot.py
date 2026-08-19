@@ -13,7 +13,7 @@ from aiogram.types import (
 from aiogram.filters import Filter
 
 # ================= CONFIGURACIÓN =================
-TOKEN = '8689803553:AAEsQ6Pvwxnil8g8feUxnRuMBEL5D0r9U1Q'
+TOKEN = '8888689268:AAF7S1tGI80htyWx0lWNNKD22Fw18axdhRU'
 
 # Lista de IDs de los usuarios designados
 AUTHORIZED_IDS = [
