@@ -15,7 +15,7 @@ from aiogram.filters import Filter
 
 # ================= CONFIGURACIÓN =================
 # TU NUEVO TOKEN
-TOKEN = '8833704103:AAGaNnBX2XpRxcFnjiC3m_5E2FAVXL7rmrs'
+TOKEN = '8849830719:AAF9u-rnhezgXzg-iTQ26I71sjOXaFx43t0'
 
 # Lista de IDs de los usuarios designados
 AUTHORIZED_IDS = [
