@@ -6,7 +6,8 @@ from typing import Dict, Any
 from aiohttp import web
 from motor.motor_asyncio import AsyncIOMotorClient
 
-from aiogram import Bot, Dispatcher, F
+# ¡Agregamos Router a las importaciones!
+from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import CommandStart, Command
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.enums import ParseMode
@@ -25,15 +26,15 @@ PORT = int(os.getenv("PORT", 8080))
 
 db_client = AsyncIOMotorClient(MONGO_URI)
 db = db_client.bot_manager
-bots_collection = db.bots   # Documento del bot incluye: owner_id, token, targets, settings
+bots_collection = db.bots
 media_collection = db.media
 
 active_bots_tasks: Dict[int, Dict] = {}
 
 master_dp = Dispatcher()
-child_dp = Dispatcher()
+# CAMBIO CLAVE: Usamos un Router para las funciones de los hijos
+child_router = Router() 
 
-# Configuración por defecto para nuevos bots hijos
 DEFAULT_SETTINGS = {
     "photos": True,
     "videos": True,
@@ -45,7 +46,6 @@ DEFAULT_SETTINGS = {
 # 2. INTERFAZ Y LÓGICA DE LOS BOTS HIJOS
 # ==========================================
 def get_child_menu(settings: Dict[str, Any]) -> InlineKeyboardMarkup:
-    """Genera el teclado interactivo del bot hijo basado en sus configuraciones."""
     btn_photos = "🟢 Fotos" if settings.get("photos", True) else "🔴 Fotos"
     btn_videos = "🟢 Videos" if settings.get("videos", True) else "🔴 Videos"
     btn_docs = "🟢 Docs" if settings.get("docs", True) else "🔴 Docs"
@@ -60,12 +60,11 @@ def get_child_menu(settings: Dict[str, Any]) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=btn_pause, callback_data="toggle_pause")]
     ])
 
-@child_dp.message(CommandStart(), F.chat.type == "private")
+@child_router.message(CommandStart(), F.chat.type == "private")
 async def child_start(message: Message, bot: Bot):
-    """Panel de control del bot hijo. Solo responde al dueño."""
     bot_data = await bots_collection.find_one({"_id": bot.id})
     if not bot_data or message.from_user.id != bot_data.get("owner_id"):
-        return # Ignora a cualquier persona que no sea el dueño
+        return
 
     settings = bot_data.get("settings", DEFAULT_SETTINGS)
     text = (
@@ -75,16 +74,15 @@ async def child_start(message: Message, bot: Bot):
     )
     await message.answer(text, reply_markup=get_child_menu(settings))
 
-@child_dp.callback_query(F.data.startswith("toggle_"))
+@child_router.callback_query(F.data.startswith("toggle_"))
 async def child_toggle_settings(callback: CallbackQuery, bot: Bot):
-    """Maneja los clics en los botones de configuración del bot hijo."""
     bot_data = await bots_collection.find_one({"_id": bot.id})
     if not bot_data or callback.from_user.id != bot_data.get("owner_id"):
         await callback.answer("No tienes permisos.", show_alert=True)
         return
 
     settings = bot_data.get("settings", DEFAULT_SETTINGS)
-    action = callback.data.split("_")[1] # photos, videos, docs, pause
+    action = callback.data.split("_")[1]
 
     if action == "pause":
         settings["is_paused"] = not settings.get("is_paused", False)
@@ -93,16 +91,12 @@ async def child_toggle_settings(callback: CallbackQuery, bot: Bot):
         settings[action] = not settings.get(action, True)
         msg = f"Filtro actualizado: {action}"
 
-    # Guardar en BD
     await bots_collection.update_one({"_id": bot.id}, {"$set": {"settings": settings}})
-    
-    # Actualizar botones
     await callback.message.edit_reply_markup(reply_markup=get_child_menu(settings))
     await callback.answer(msg)
 
-@child_dp.message(F.photo | F.video | F.document)
+@child_router.message(F.photo | F.video | F.document)
 async def forward_media(message: Message, bot: Bot):
-    """Extrae la multimedia aplicando los filtros de configuración del dueño."""
     if message.chat.type not in ["group", "supergroup"]:
         return
 
@@ -110,11 +104,8 @@ async def forward_media(message: Message, bot: Bot):
     if not bot_data: return
 
     settings = bot_data.get("settings", DEFAULT_SETTINGS)
-    
-    # 1. Comprobar si está pausado
     if settings.get("is_paused", False): return
 
-    # 2. Comprobar filtros por tipo de archivo
     file_unique_id = None
     if message.photo:
         if not settings.get("photos", True): return
@@ -128,13 +119,11 @@ async def forward_media(message: Message, bot: Bot):
 
     if not file_unique_id: return
 
-    # 3. Anti-Duplicados
     is_duplicate = await media_collection.find_one({"bot_id": bot.id, "file_unique_id": file_unique_id})
     if is_duplicate: return
 
     await media_collection.insert_one({"bot_id": bot.id, "file_unique_id": file_unique_id})
 
-    # 4. Reenvío
     targets = list(set([bot_data["owner_id"]] + bot_data.get("targets", [])))
     for target_id in targets:
         try:
@@ -266,6 +255,10 @@ async def receive_token(message: Message):
             upsert=True
         )
         
+        # CAMBIO CLAVE: Creamos un Dispatcher NUEVO exclusivo para este bot
+        child_dp = Dispatcher()
+        child_dp.include_router(child_router) # Le inyectamos el router
+        
         task = asyncio.create_task(child_dp.start_polling(new_bot, handle_signals=False))
         active_bots_tasks[bot_id] = {"task": task, "bot": new_bot}
         
@@ -305,6 +298,11 @@ async def restore_bots():
         new_bot = Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
         try:
             await new_bot.get_me()
+            
+            # CAMBIO CLAVE: Un Dispatcher nuevo al restaurar cada bot
+            child_dp = Dispatcher()
+            child_dp.include_router(child_router)
+            
             task = asyncio.create_task(child_dp.start_polling(new_bot, handle_signals=False))
             active_bots_tasks[bot_id] = {"task": task, "bot": new_bot}
         except Exception:
