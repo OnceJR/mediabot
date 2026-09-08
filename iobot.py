@@ -19,7 +19,7 @@ from aiogram.exceptions import TelegramUnauthorizedError, TelegramAPIError
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-MASTER_BOT_TOKEN = os.getenv("MASTER_BOT_TOKEN", "8527819825:AAGxLaJtaevQsvubUVaVsd2BgdnHeNDK3_o)
+MASTER_BOT_TOKEN = os.getenv("MASTER_BOT_TOKEN", "8527819825:AAGxLaJtaevQsvubUVaVsd2BgdnHeNDK3_o")
 MONGO_URI = os.getenv("MONGO_URI", "mongodb+srv://carlosjrpelegrina_db_user:1DNyN9AFa9bh1tCr@cluster0.haf2f1l.mongodb.net")
 PORT = int(os.getenv("PORT", 8080)) # Puerto requerido por Render
 
