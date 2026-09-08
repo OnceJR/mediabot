@@ -329,17 +329,3 @@ if __name__ == "__main__":
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
         logger.info("Script detenido.")
-s de los hijos
-        for bot_id, data in active_bots_tasks.items():
-            data["task"].cancel()
-            await data["bot"].session.close()
-            
-        await master_bot.session.close()
-        db_client.close()
-
-if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except (KeyboardInterrupt, SystemExit):
-        logger.info("Script detenido.")
-        
