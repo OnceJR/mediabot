@@ -6,8 +6,7 @@ from typing import Dict, Any
 from aiohttp import web
 from motor.motor_asyncio import AsyncIOMotorClient
 
-# ¡Agregamos Router a las importaciones!
-from aiogram import Bot, Dispatcher, F, Router
+from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart, Command
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.enums import ParseMode
@@ -32,8 +31,6 @@ media_collection = db.media
 active_bots_tasks: Dict[int, Dict] = {}
 
 master_dp = Dispatcher()
-# CAMBIO CLAVE: Usamos un Router para las funciones de los hijos
-child_router = Router() 
 
 DEFAULT_SETTINGS = {
     "photos": True,
@@ -43,7 +40,7 @@ DEFAULT_SETTINGS = {
 }
 
 # ==========================================
-# 2. INTERFAZ Y LÓGICA DE LOS BOTS HIJOS
+# 2. LÓGICA DE LOS BOTS HIJOS (SIN DECORADORES)
 # ==========================================
 def get_child_menu(settings: Dict[str, Any]) -> InlineKeyboardMarkup:
     btn_photos = "🟢 Fotos" if settings.get("photos", True) else "🔴 Fotos"
@@ -60,7 +57,6 @@ def get_child_menu(settings: Dict[str, Any]) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=btn_pause, callback_data="toggle_pause")]
     ])
 
-@child_router.message(CommandStart(), F.chat.type == "private")
 async def child_start(message: Message, bot: Bot):
     bot_data = await bots_collection.find_one({"_id": bot.id})
     if not bot_data or message.from_user.id != bot_data.get("owner_id"):
@@ -74,7 +70,6 @@ async def child_start(message: Message, bot: Bot):
     )
     await message.answer(text, reply_markup=get_child_menu(settings))
 
-@child_router.callback_query(F.data.startswith("toggle_"))
 async def child_toggle_settings(callback: CallbackQuery, bot: Bot):
     bot_data = await bots_collection.find_one({"_id": bot.id})
     if not bot_data or callback.from_user.id != bot_data.get("owner_id"):
@@ -95,7 +90,6 @@ async def child_toggle_settings(callback: CallbackQuery, bot: Bot):
     await callback.message.edit_reply_markup(reply_markup=get_child_menu(settings))
     await callback.answer(msg)
 
-@child_router.message(F.photo | F.video | F.document)
 async def forward_media(message: Message, bot: Bot):
     if message.chat.type not in ["group", "supergroup"]:
         return
@@ -130,6 +124,15 @@ async def forward_media(message: Message, bot: Bot):
             await message.copy_to(chat_id=target_id)
         except TelegramAPIError:
             pass
+
+# ¡EL SECRETO ESTÁ AQUÍ! Fábrica de Dispatchers vírgenes
+def get_new_child_dp() -> Dispatcher:
+    dp = Dispatcher()
+    # Registramos las funciones manualmente a este Dispatcher único
+    dp.message.register(child_start, CommandStart(), F.chat.type == "private")
+    dp.callback_query.register(child_toggle_settings, F.data.startswith("toggle_"))
+    dp.message.register(forward_media, F.photo | F.video | F.document)
+    return dp
 
 
 # ==========================================
@@ -255,10 +258,8 @@ async def receive_token(message: Message):
             upsert=True
         )
         
-        # CAMBIO CLAVE: Creamos un Dispatcher NUEVO exclusivo para este bot
-        child_dp = Dispatcher()
-        child_dp.include_router(child_router) # Le inyectamos el router
-        
+        # INYECTAMOS EL NUEVO DISPATCHER VIRGEN
+        child_dp = get_new_child_dp()
         task = asyncio.create_task(child_dp.start_polling(new_bot, handle_signals=False))
         active_bots_tasks[bot_id] = {"task": task, "bot": new_bot}
         
@@ -299,10 +300,8 @@ async def restore_bots():
         try:
             await new_bot.get_me()
             
-            # CAMBIO CLAVE: Un Dispatcher nuevo al restaurar cada bot
-            child_dp = Dispatcher()
-            child_dp.include_router(child_router)
-            
+            # INYECTAMOS EL NUEVO DISPATCHER AL RESTAURAR
+            child_dp = get_new_child_dp()
             task = asyncio.create_task(child_dp.start_polling(new_bot, handle_signals=False))
             active_bots_tasks[bot_id] = {"task": task, "bot": new_bot}
         except Exception:
